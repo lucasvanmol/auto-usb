@@ -12,16 +12,17 @@ fn main() -> windows::Result<()> {
     unsafe {
         letter = get_new_drive().unwrap();    
     }
+    println!("Found drive {:?}", letter);
 
     for entry in  fs::read_dir(letter.to_string() + ":").unwrap() {
         match entry {
             Ok(entry) => {
-                dbg!(entry.path());
+                println!("Found file {:?}", entry.path());
 
                 if let Some(ext) = entry.path().extension() {
                     if ext == "html" {
                         let p = entry.path();
-                        println!("{:?}", &p);
+                        println!("Opening {:?}", &p);
 
                         // Run using kiosk mode in Edge
                         Command::new("cmd")
@@ -56,6 +57,7 @@ fn main() -> windows::Result<()> {
 
 unsafe fn get_new_drive() -> Option<char> {
     let mut drives = GetLogicalDrives();
+    println!("Listening for USB...");
     loop {
         sleep(Duration::new(0, 500 * 10^6));
         let d = GetLogicalDrives();
