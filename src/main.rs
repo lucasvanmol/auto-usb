@@ -26,7 +26,6 @@ fn open_html(drive: char) -> io::Result<()> {
     for entry in  fs::read_dir(drive.to_string() + ":")? {
         match entry {
             Ok(entry) => {
-                println!("Found file {:?}", entry.path());
 
                 if let Some(ext) = entry.path().extension() {
                     if ext == "html" {
