@@ -1,4 +1,4 @@
-use std::{fs, thread::sleep, time::Duration, process::Command};
+use std::{fs, io, process::Command, thread::sleep, time::Duration};
 
 use bindings::{
     Windows::Win32::Storage::FileSystem::GetLogicalDrives,
@@ -7,14 +7,23 @@ use bindings::{
 // Run in background as windows service
 // https://crates.io/crates/windows-service
 
-fn main() -> windows::Result<()> {
-    let letter: char;
-    unsafe {
-        letter = get_new_drive().unwrap();    
+fn main() {
+    loop {
+        let letter: char;
+        unsafe {
+            letter = get_new_drive().unwrap();    
+        }
+        println!("Found drive {:?}", letter);
+        
+        match open_html(letter) {
+            Ok(_) => {},
+            Err(err) => eprintln!("Error opening file: {}", err),
+        };
     }
-    println!("Found drive {:?}", letter);
+}
 
-    for entry in  fs::read_dir(letter.to_string() + ":").unwrap() {
+fn open_html(drive: char) -> io::Result<()> {
+    for entry in  fs::read_dir(drive.to_string() + ":")? {
         match entry {
             Ok(entry) => {
                 println!("Found file {:?}", entry.path());
@@ -33,8 +42,7 @@ fn main() -> windows::Result<()> {
                             .arg(p)
                             .arg("--edge-kiosk-type=fullscreen")
                             .arg("--no-first-run")
-                            .output()
-                            .expect("failed to execute process");
+                            .output()?;
                         
                         // Command::new("cmd")
                         //     .arg("/C")
@@ -47,25 +55,23 @@ fn main() -> windows::Result<()> {
                     }
                 }
             },
-            Err(_) => todo!(),
+            Err(err) => eprintln!("Error during directory traversal: {}", err),
         }
     }
-    
-    
+
     Ok(())
 }
 
 unsafe fn get_new_drive() -> Option<char> {
     let mut drives = GetLogicalDrives();
-    println!("Listening for USB...");
+    println!("Listening for new drives...");
     loop {
         sleep(Duration::new(0, 500 * 10^6));
         let d = GetLogicalDrives();
         if d > drives {
             let mask = d ^ drives;
-            if mask.count_ones() == 1 {
-                return get_drive_letter(mask);
-            }
+            // Return one drive letter even if two drives are inserted at same times
+            return get_drive_letter(mask);
         } else if d < drives {
             drives = d;
         }
