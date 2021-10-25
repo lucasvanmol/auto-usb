@@ -1,4 +1,5 @@
 use std::{fs, io::{self, Error, ErrorKind}, process::Command, thread::sleep, time::Duration};
+use std::os::windows::prelude::*;
 
 use bindings::{Windows::Win32::Foundation::RECT, Windows::Win32::{Foundation::{BOOL, LPARAM}, Graphics::Gdi::{EnumDisplayMonitors, HDC, HMONITOR}}, Windows::Win32::Storage::FileSystem::GetLogicalDrives};
 
@@ -14,8 +15,10 @@ fn main() {
     println!("Detected {} monitors", monitors.len());
     loop {
         let letter: char;
+        println!("Listening for new drives...");
+
         unsafe {
-            match get_new_drive() {
+            match listen_for_unencrypted_drive() {
                 Ok(l) => letter = l,
                 Err(err) => {
                     eprintln!("{}", err);
@@ -23,7 +26,6 @@ fn main() {
                 },
             }
         }
-        println!("Found drive {:?}", letter);
         
         for monitor in &monitors {
             match open_html(letter, monitor) {
@@ -46,13 +48,13 @@ unsafe fn get_monitors() -> io::Result<Vec<RECT>> {
 
     // Pass in raw pointer (as isize) to a Vec<RECT>
     // to keep track of all monitor positions
-    let monitors: Vec<RECT> = Vec::new();
-    let ptr = &monitors as *const Vec<RECT> as isize;
+    let mut monitors: Vec<RECT> = Vec::new();
+    let ptr = &mut monitors as *mut Vec<RECT> as isize;
 
     let ret = EnumDisplayMonitors(
         None, 
         &lprclip, 
-    Some(monitor_cb), 
+        Some(monitor_cb), 
         LPARAM(ptr)
     );
     
@@ -104,20 +106,51 @@ fn open_html(drive: char, position: &RECT) -> io::Result<()> {
     Ok(())
 }
 
-unsafe fn get_new_drive() -> io::Result<char> {
+unsafe fn listen_for_unencrypted_drive() -> io::Result<char> {
     let mut drives = GetLogicalDrives();
-    println!("Listening for new drives...");
+    let mut new_drives: Vec<char> = Vec::new();
     loop {
         sleep(Duration::new(0, DRIVE_POLLING_MS * 10^6));
         let d = GetLogicalDrives();
-        if d > drives {
+        if d != drives {
             let mask = d ^ drives;
-            // Return one drive letter even if two drives are inserted at same time
-            return get_drive_letter(mask);
-        } else if d < drives {
+            let letter = get_drive_letter(mask)?;
+            if d > drives {
+                println!("Found drive: {:?}", letter);
+
+                if let Ok(encrypted) = is_dir_encrypted(&letter) {
+                    if !encrypted {
+                        return Ok(letter);
+                    } else {
+                        println!("Drive {:?} encrypted. Waiting for unlock...", letter);
+                    }
+                }
+
+                new_drives.push(letter);   
+            } else  {
+                println!("Drive removed: {:?}", letter);
+                if let Some(index) = new_drives.iter().position(|&c| c == letter) {
+                    new_drives.swap_remove(index);
+                }
+            }
             drives = d;
         }
+        for drive in new_drives.iter() {
+            if let Ok(encrypted) = is_dir_encrypted(drive) {
+                if !encrypted {
+                    println!("Drive {:?} unlocked!", drive);
+                    return Ok(*drive);
+                }
+            }
+        }
     }  
+}
+
+fn is_dir_encrypted(letter: &char) -> io::Result<bool> {
+    let metadata = fs::metadata(format!("{}:/", letter))?;
+    // https://docs.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants
+    // 0x4000 FILE_ATTRIBUTE_ENCRYPTED
+    Ok((metadata.file_attributes() & 0x4000) != 0)
 }
 
 const LETTERS: [char; 26] = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
